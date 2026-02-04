@@ -153,6 +153,71 @@
             margin-top: 5px;
         }
 
+        .note-tags {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 5px;
+            margin-top: 8px;
+        }
+
+        .tag {
+            display: inline-block;
+            padding: 3px 8px;
+            background: #000000;
+            color: white;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 500;
+        }
+
+        .tag-input-container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 5px;
+            padding: 8px;
+            border: 2px solid #e1e5e9;
+            border-radius: 10px;
+            min-height: 42px;
+            align-items: center;
+            cursor: text;
+        }
+
+        .tag-input-container:focus-within {
+            border-color: #000000;
+        }
+
+        .tag-item {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            padding: 4px 10px;
+            background: #000000;
+            color: white;
+            border-radius: 12px;
+            font-size: 13px;
+        }
+
+        .tag-remove {
+            cursor: pointer;
+            font-weight: bold;
+            padding: 0 3px;
+            border-radius: 50%;
+            transition: background 0.2s;
+        }
+
+        .tag-remove:hover {
+            background: rgba(255, 255, 255, 0.2);
+        }
+
+        .tag-input {
+            border: none;
+            outline: none;
+            padding: 4px;
+            flex: 1;
+            min-width: 100px;
+            font-size: 14px;
+        }
+
         .editor-header {
             display: flex;
             justify-content: space-between;
@@ -359,6 +424,18 @@
                     </div>
 
                     <div class="form-group">
+                        <label class="form-label" for="noteDate">Date</label>
+                        <input type="date" class="form-input" id="noteDate">
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label" for="noteTags">Tags</label>
+                        <div class="tag-input-container" id="tagContainer">
+                            <input type="text" class="tag-input" id="noteTagsInput" placeholder="Type and press Enter to add tags...">
+                        </div>
+                    </div>
+
+                    <div class="form-group">
                         <label class="form-label" for="noteContent">Content</label>
                         <textarea class="form-textarea" id="noteContent" placeholder="Start writing your note..."></textarea>
                     </div>
@@ -378,6 +455,7 @@
                 this.notes = [];
                 this.currentNote = null;
                 this.isLoading = false;
+                this.currentTags = [];
                 this.init();
             }
 
@@ -392,6 +470,20 @@
                 document.getElementById('deleteBtn').addEventListener('click', () => this.deleteNote());
                 document.getElementById('searchBox').addEventListener('input', (e) => this.searchNotes(e.target.value));
                 
+                // Tag input handling
+                const tagInput = document.getElementById('noteTagsInput');
+                tagInput.addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter' && tagInput.value.trim()) {
+                        e.preventDefault();
+                        this.addTag(tagInput.value.trim());
+                        tagInput.value = '';
+                    }
+                });
+                
+                document.getElementById('tagContainer').addEventListener('click', () => {
+                    tagInput.focus();
+                });
+                
                 // Auto-save on content change (debounced)
                 let saveTimeout;
                 const autoSave = () => {
@@ -405,6 +497,7 @@
                 
                 document.getElementById('noteTitle').addEventListener('input', autoSave);
                 document.getElementById('noteContent').addEventListener('input', autoSave);
+                document.getElementById('noteDate').addEventListener('change', autoSave);
             }
 
             async loadNotes() {
@@ -438,7 +531,12 @@
                          data-note-id="${note.id}" onclick="noteTaker.selectNote(${note.id})">
                         <div class="note-title">${this.escapeHtml(note.title || 'Untitled')}</div>
                         <div class="note-preview">${this.escapeHtml(note.content || 'No content')}</div>
-                        <div class="note-date">${this.formatDate(note.updated_at)}</div>
+                        ${note.tags && note.tags.length > 0 ? `
+                        <div class="note-tags">
+                            ${note.tags.map(tag => `<span class="tag">${this.escapeHtml(tag)}</span>`).join('')}
+                        </div>
+                        ` : ''}
+                        <div class="note-date">${note.date ? this.formatNoteDate(note.date) : this.formatDate(note.updated_at)}</div>
                     </div>
                 `).join('');
             }
@@ -448,12 +546,15 @@
                 if (!note) return;
 
                 this.currentNote = note;
+                this.currentTags = note.tags || [];
                 this.showEditor();
                 this.renderNotesList(); // Re-render to update active state
                 
                 document.getElementById('noteTitle').value = note.title || '';
                 document.getElementById('noteContent').value = note.content || '';
+                document.getElementById('noteDate').value = note.date || '';
                 document.getElementById('editorTitle').textContent = note.title || 'Untitled Note';
+                this.renderTags();
             }
 
             createNewNote() {
@@ -461,15 +562,20 @@
                     id: null,
                     title: '',
                     content: '',
+                    date: '',
+                    tags: [],
                     created_at: new Date().toISOString(),
                     updated_at: new Date().toISOString()
                 };
+                this.currentTags = [];
                 
                 this.showEditor();
                 document.getElementById('noteTitle').value = '';
                 document.getElementById('noteContent').value = '';
+                document.getElementById('noteDate').value = '';
                 document.getElementById('editorTitle').textContent = 'New Note';
                 document.getElementById('noteTitle').focus();
+                this.renderTags();
                 
                 // Remove active state from all notes
                 document.querySelectorAll('.note-item').forEach(item => {
@@ -507,7 +613,9 @@
                 try {
                     const noteData = {
                         title: title || 'Untitled',
-                        content: content
+                        content: content,
+                        date: document.getElementById('noteDate').value,
+                        tags: this.currentTags
                     };
 
                     let response;
@@ -577,7 +685,8 @@
                 const filteredNotes = query.trim() === '' ? this.notes : 
                     this.notes.filter(note => 
                         (note.title && note.title.toLowerCase().includes(query.toLowerCase())) ||
-                        (note.content && note.content.toLowerCase().includes(query.toLowerCase()))
+                        (note.content && note.content.toLowerCase().includes(query.toLowerCase())) ||
+                        (note.tags && note.tags.some(tag => tag.toLowerCase().includes(query.toLowerCase())))
                     );
 
                 const notesList = document.getElementById('notesList');
@@ -591,7 +700,12 @@
                          data-note-id="${note.id}" onclick="noteTaker.selectNote(${note.id})">
                         <div class="note-title">${this.escapeHtml(note.title || 'Untitled')}</div>
                         <div class="note-preview">${this.escapeHtml(note.content || 'No content')}</div>
-                        <div class="note-date">${this.formatDate(note.updated_at)}</div>
+                        ${note.tags && note.tags.length > 0 ? `
+                        <div class="note-tags">
+                            ${note.tags.map(tag => `<span class="tag">${this.escapeHtml(tag)}</span>`).join('')}
+                        </div>
+                        ` : ''}
+                        <div class="note-date">${note.date ? this.formatNoteDate(note.date) : this.formatDate(note.updated_at)}</div>
                     </div>
                 `).join('');
             }
@@ -630,6 +744,44 @@
                 } else {
                     return date.toLocaleDateString();
                 }
+            }
+
+            formatNoteDate(dateString) {
+                if (!dateString) return '';
+                const date = new Date(dateString);
+                return date.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+            }
+
+            addTag(tag) {
+                if (tag && !this.currentTags.includes(tag)) {
+                    this.currentTags.push(tag);
+                    this.renderTags();
+                }
+            }
+
+            removeTag(tag) {
+                this.currentTags = this.currentTags.filter(t => t !== tag);
+                this.renderTags();
+            }
+
+            renderTags() {
+                const container = document.getElementById('tagContainer');
+                const input = document.getElementById('noteTagsInput');
+                
+                // Clear existing tags but keep the input
+                const existingTags = container.querySelectorAll('.tag-item');
+                existingTags.forEach(tag => tag.remove());
+                
+                // Add current tags
+                this.currentTags.forEach(tag => {
+                    const tagElement = document.createElement('div');
+                    tagElement.className = 'tag-item';
+                    tagElement.innerHTML = `
+                        <span>${this.escapeHtml(tag)}</span>
+                        <span class="tag-remove" onclick="noteTaker.removeTag('${this.escapeHtml(tag)}')">×</span>
+                    `;
+                    container.insertBefore(tagElement, input);
+                });
             }
         }
 
